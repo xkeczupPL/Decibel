@@ -240,68 +240,57 @@
             }
         }
 
-                        async function pobierzStrumienYoutubei(videoId) {
-                            const yt = await pobierzInnertube();
-                            if (yt) {
-                                for (const klient of ["ANDROID_VR", "TV_EMBEDDED", "IOS", "ANDROID"]) {
+                                async function pobierzStrumienYoutubei(videoId) {
                                     try {
-                                        const info = await yt.getBasicInfo(videoId, klient);
-                                        const dane = info.streaming_data;
-                                        const formaty = ((dane && dane.adaptive_formats) || [])
-                                            .filter(f => f.has_audio && !f.has_video && f.url);
+                                        const endpoint = ["https:", "", "www.youtube.com", "youtubei", "v1", "player?prettyPrint=false"].join("/");
+                                        const res = await fetch(endpoint, {
+                                            method: "POST",
+                                            headers: {
+                                                "Content-Type": "application/json",
+                                                "User-Agent": "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+                                                "X-YouTube-Client-Name": "28",
+                                                "X-YouTube-Client-Version": "1.60.19"
+                                            },
+                                            body: JSON.stringify({
+                                                videoId: videoId,
+                                                params: "CgIIAQ==",
+                                                playbackContext: {
+                                                    contentPlaybackContext: {
+                                                        html5Preference: "HTML5_PREF_WANTS"
+                                                    }
+                                                },
+                                                context: {
+                                                    client: {
+                                                        clientName: "ANDROID_VR",
+                                                        clientVersion: "1.60.19",
+                                                        androidSdkVersion: 32,
+                                                        osName: "Android",
+                                                        osVersion: "12L",
+                                                        deviceMake: "Oculus",
+                                                        deviceModel: "Quest 3",
+                                                        hl: "en",
+                                                        gl: "US"
+                                                    }
+                                                }
+                                            })
+                                        });
+                                        const dane = await res.json().catch(() => null);
+                                        const formaty = (dane && dane.streamingData && Array.isArray(dane.streamingData.adaptiveFormats))
+                                            ? dane.streamingData.adaptiveFormats.filter(f => f.url && f.mimeType && f.mimeType.startsWith("audio/"))
+                                            : [];
                                         if (formaty.length) {
-                                            const waga = f => (f.mime_type && f.mime_type.includes("mp4") ? 1 : 0);
+                                            const waga = f => (f.mimeType.includes("mp4") ? 1 : 0);
                                             formaty.sort((a, b) => (waga(b) - waga(a)) || ((b.bitrate || 0) - (a.bitrate || 0)));
-                                            return formaty[0].url;
+                                            return formaty.url;
                                         }
-                                        zglosBlad("youtubei " + klient + ": brak formatów audio");
+                                        const status = dane && dane.playabilityStatus ? dane.playabilityStatus.status + " " + (dane.playabilityStatus.reason || "") : res.status;
+                                        zglosBlad("player ANDROID_VR: " + status);
                                     } catch (e) {
-                                        zglosBlad("youtubei " + klient + ": " + (e && e.message ? e.message : e));
+                                        zglosBlad("player ANDROID_VR: " + (e && e.message ? e.message : e));
                                     }
+                                    return null;
                                 }
-                            }
 
-                            try {
-                                const endpoint = ["https:", "", "www.youtube.com", "youtubei", "v1", "player?prettyPrint=false"].join("/");
-                                const res = await fetch(endpoint, {
-                                    method: "POST",
-                                    headers: {
-                                        "Content-Type": "application/json",
-                                        "User-Agent": "com.google.android.apps.youtube.vr.oculus/1.56.21 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
-                                        "X-YouTube-Client-Name": "28",
-                                        "X-YouTube-Client-Version": "1.56.21"
-                                    },
-                                    body: JSON.stringify({
-                                        videoId: videoId,
-                                        context: {
-                                            client: {
-                                                clientName: "ANDROID_VR",
-                                                clientVersion: "1.56.21",
-                                                androidSdkVersion: 32,
-                                                osName: "Android",
-                                                osVersion: "12L",
-                                                deviceMake: "Oculus",
-                                                deviceModel: "Quest 3"
-                                            }
-                                        }
-                                    })
-                                });
-                                const dane = await res.json().catch(() => null);
-                                const formaty = (dane && dane.streamingData && Array.isArray(dane.streamingData.adaptiveFormats))
-                                    ? dane.streamingData.adaptiveFormats.filter(f => f.url && f.mimeType && f.mimeType.startsWith("audio/"))
-                                    : [];
-                                if (formaty.length) {
-                                    const waga = f => (f.mimeType.includes("mp4") ? 1 : 0);
-                                    formaty.sort((a, b) => (waga(b) - waga(a)) || ((b.bitrate || 0) - (a.bitrate || 0)));
-                                    return formaty[0].url;
-                                }
-                                zglosBlad("player ANDROID_VR: brak formatów (" + res.status + ")");
-                            } catch (e) {
-                                zglosBlad("player ANDROID_VR: " + (e && e.message ? e.message : e));
-                            }
-
-                            return null;
-                        }
 
 
 
