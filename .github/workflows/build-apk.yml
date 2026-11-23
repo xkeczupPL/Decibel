@@ -13,7 +13,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - run: npm install
+      - run: npm install @capacitor/assets
       - run: npx cap add android
+      - run: npx capacitor-assets generate --android
       - run: npx cap sync android
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
