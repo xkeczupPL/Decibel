@@ -58,6 +58,7 @@
         let aktualnyBlobUrl = null;
         let PIPED_INSTANCES = DOMYSLNE_INSTANCJE.slice();
         let ostatniBlad = "";
+        let bledy = [];
 
         const GATUNKI = ["Rock i Metal", "Rap i Hip-Hop", "Pop", "Muzyka Elektroniczna", "Chill / Lo-Fi"];
 
@@ -169,10 +170,10 @@
                         return dane;
                     }
                     const powod = dane && (dane.message || dane.error) ? String(dane.message || dane.error).slice(0, 80) : "zła odpowiedź";
-                    ostatniBlad = serwer.replace("https://", "") + ": " + res.status + " " + powod;
+                    zglosBlad(serwer.replace("https://", "") + ": " + res.status + " " + powod);
                 } catch (e) {
                     clearTimeout(limit);
-                    ostatniBlad = serwer.replace("https://", "") + ": brak połączenia";
+                    zglosBlad(serwer.replace("https://", "") + ": brak połączenia");
                 }
                 console.warn("Piped:", ostatniBlad);
             }
@@ -182,7 +183,7 @@
         async function pobierzStrumienInvidious(videoId) {
             for (const serwer of INVIDIOUS_INSTANCJE) {
                 const kontroler = new AbortController();
-                const limit = setTimeout(() => kontroler.abort(), 12000);
+                const limit = setTimeout(() => kontroler.abort(), 6000);
                 try {
                     const res = await fetch(serwer + "/api/v1/videos/" + encodeURIComponent(videoId) + "?local=true", { signal: kontroler.signal });
                     const dane = await res.json().catch(() => null);
@@ -196,14 +197,82 @@
                         const url = formaty[0].url;
                         return url.startsWith("/") ? serwer + url : url;
                     }
-                    ostatniBlad = serwer.replace("https://", "") + ": " + res.status;
+                    zglosBlad(serwer.replace("https://", "") + ": " + res.status);
                 } catch (e) {
                     clearTimeout(limit);
-                    ostatniBlad = serwer.replace("https://", "") + ": brak połączenia";
+                    zglosBlad(serwer.replace("https://", "") + ": brak połączenia");
                 }
                 console.warn("Invidious:", ostatniBlad);
             }
             return null;
+        }
+
+        let innertubeObietnica = null;
+
+        function pobierzInnertube() {
+            if (!innertubeObietnica) {
+                innertubeObietnica = import('./youtubei.bundle.js')
+                    .then(m => m.Innertube.create({ retrieve_player: false, generate_session_locally: true }))
+                    .catch(e => {
+                        zglosBlad("youtubei: " + (e && e.message ? e.message : e));
+                        innertubeObietnica = null;
+                        return null;
+                    });
+            }
+            return innertubeObietnica;
+        }
+
+        async function szukajYoutubei(query) {
+            const yt = await pobierzInnertube();
+            if (!yt) return null;
+            try {
+                const wynik = await yt.search(query);
+                return (wynik.results || [])
+                    .filter(r => r.type === 'Video' && r.id)
+                    .map(r => ({
+                        title: r.title && r.title.text ? r.title.text : String(r.title || ""),
+                        url: r.id,
+                        artist: r.author && r.author.name ? r.author.name : ""
+                    }));
+            } catch (e) {
+                zglosBlad("youtubei szukaj: " + (e && e.message ? e.message : e));
+                return null;
+            }
+        }
+
+        async function pobierzStrumienYoutubei(videoId) {
+            const yt = await pobierzInnertube();
+            if (!yt) return null;
+            for (const klient of ["IOS", "ANDROID"]) {
+                try {
+                    const info = await yt.getBasicInfo(videoId, klient);
+                    const dane = info.streaming_data;
+                    const formaty = ((dane && dane.adaptive_formats) || [])
+                        .filter(f => f.has_audio && !f.has_video && f.url);
+                    if (formaty.length) {
+                        const waga = f => (f.mime_type && f.mime_type.includes("mp4") ? 1 : 0);
+                        formaty.sort((a, b) => (waga(b) - waga(a)) || ((b.bitrate || 0) - (a.bitrate || 0)));
+                        return formaty[0].url;
+                    }
+                    zglosBlad("youtubei " + klient + ": brak formatów audio");
+                } catch (e) {
+                    zglosBlad("youtubei " + klient + ": " + (e && e.message ? e.message : e));
+                }
+            }
+            return null;
+        }
+
+        function zglosBlad(tekst) {
+            ostatniBlad = tekst;
+            bledy.push(tekst);
+        }
+
+        function pokazBledy() {
+            playlistModal.replaceChildren();
+            playlistModal.appendChild(el('h3', '', 'Nie udało się pobrać utworu'));
+            playlistModal.appendChild(el('pre', 'lyrics-text', bledy.length ? bledy.join("\n") : "Brak szczegółów"));
+            playlistModal.appendChild(przycisk('Zamknij', 'accent', zamknijModale));
+            otworzModal(playlistModal);
         }
 
         function otworzBaze() {
@@ -283,6 +352,12 @@
         }
 
         async function szukaj(query) {
+            const wynikiPiped = await szukajPiped(query);
+            if (wynikiPiped) return wynikiPiped;
+            return await szukajYoutubei(query);
+        }
+
+        async function szukajPiped(query) {
             const dane = await zapytajPiped(
                 "/search?q=" + encodeURIComponent(query) + "&filter=music_songs",
                 d => d && Array.isArray(d.items)
@@ -298,10 +373,13 @@
         }
 
         async function pobierzStrumien(videoId) {
+            bledy = [];
+            const bezposredni = await pobierzStrumienYoutubei(videoId);
+            if (bezposredni) return bezposredni;
             const dane = await zapytajPiped(
                 "/streams/" + encodeURIComponent(videoId),
                 d => d && Array.isArray(d.audioStreams) && d.audioStreams.some(s => s.url),
-                15000
+                10000
             );
             if (dane) {
                 const strumienie = dane.audioStreams.filter(s => s.url);
@@ -374,7 +452,7 @@
 
             if (!zrodlo) {
                 nowPlaying.textContent = track.title;
-                pokazPowiadomienie("Nie udało się pobrać utworu" + (ostatniBlad ? " (" + ostatniBlad + ")" : ""));
+                pokazBledy();
                 return;
             }
 
