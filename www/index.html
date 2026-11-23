@@ -240,20 +240,10 @@
             }
         }
 
-                                        async function pobierzStrumienYoutubei(videoId) {
-                                            const domena = "www." + "you" + "tube" + ".com";
-                                            const endpoint = "https://" + domena + "/youtubei/v1/player?prettyPrint=false";
-
-                                            const klienci = [
-                                                {
-                                                    nazwa: "ANDROID_VR",
-                                                    naglowki: {
-                                                        "Content-Type": "application/json",
-                                                        "User-Agent": "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
-                                                        "X-YouTube-Client-Name": "28",
-                                                        "X-YouTube-Client-Version": "1.60.19"
-                                                    },
-                                                    body: {
+                                                async function pobierzStrumienYoutubei(videoId) {
+                                                    const domena = "www." + "you" + "tube" + ".com";
+                                                    const endpoint = "https://" + domena + "/youtubei/v1/player?prettyPrint=false";
+                                                    const cialo = {
                                                         videoId: videoId,
                                                         params: "CgIIAQ==",
                                                         playbackContext: { contentPlaybackContext: { html5Preference: "HTML5_PREF_WANTS" } },
@@ -270,59 +260,55 @@
                                                                 gl: "US"
                                                             }
                                                         }
-                                                    }
-                                                },
-                                                {
-                                                    nazwa: "TV_EMBEDDED",
-                                                    naglowki: {
+                                                    };
+                                                    const naglowki = {
                                                         "Content-Type": "application/json",
-                                                        "X-YouTube-Client-Name": "85",
-                                                        "X-YouTube-Client-Version": "2.0"
-                                                    },
-                                                    body: {
-                                                        videoId: videoId,
-                                                        context: {
-                                                            client: {
-                                                                clientName: "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
-                                                                clientVersion: "2.0",
-                                                                clientScreen: "EMBED",
-                                                                hl: "en",
-                                                                gl: "US"
-                                                            },
-                                                            thirdParty: {
-                                                                embedUrl: "https://" + domena + "/"
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            ];
+                                                        "User-Agent": "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+                                                        "X-YouTube-Client-Name": "28",
+                                                        "X-YouTube-Client-Version": "1.60.19"
+                                                    };
 
-                                            for (const k of klienci) {
-                                                try {
-                                                    const res = await fetch(endpoint, {
-                                                        method: "POST",
-                                                        headers: k.naglowki,
-                                                        body: JSON.stringify(k.body)
-                                                    });
-                                                    const dane = await res.json().catch(() => null);
-                                                    const formaty = (dane && dane.streamingData && Array.isArray(dane.streamingData.adaptiveFormats))
-                                                        ? dane.streamingData.adaptiveFormats.filter(f => f.url && f.mimeType && f.mimeType.startsWith("audio/"))
-                                                        : [];
-                                                    if (formaty.length) {
-                                                        const waga = f => (f.mimeType.includes("mp4") ? 1 : 0);
-                                                        formaty.sort((a, b) => (waga(b) - waga(a)) || ((b.bitrate || 0) - (a.bitrate || 0)));
-                                                        return formaty[0].url;
+                                                    try {
+                                                        let dane = null;
+                                                        let statusHttp = 0;
+                                                        const capHttp = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
+                                                        if (capHttp && capHttp.request) {
+                                                            const odp = await capHttp.request({
+                                                                url: endpoint,
+                                                                method: "POST",
+                                                                headers: naglowki,
+                                                                data: cialo
+                                                            });
+                                                            statusHttp = odp.status;
+                                                            dane = typeof odp.data === "string" ? JSON.parse(odp.data) : odp.data;
+                                                        } else {
+                                                            const res = await fetch(endpoint, {
+                                                                method: "POST",
+                                                                headers: naglowki,
+                                                                body: JSON.stringify(cialo)
+                                                            });
+                                                            statusHttp = res.status;
+                                                            dane = await res.json().catch(() => null);
+                                                        }
+
+                                                        const formaty = (dane && dane.streamingData && Array.isArray(dane.streamingData.adaptiveFormats))
+                                                            ? dane.streamingData.adaptiveFormats.filter(f => f.url && f.mimeType && f.mimeType.startsWith("audio/"))
+                                                            : [];
+                                                        if (formaty.length) {
+                                                            const waga = f => (f.mimeType.includes("mp4") ? 1 : 0);
+                                                            formaty.sort((a, b) => (waga(b) - waga(a)) || ((b.bitrate || 0) - (a.bitrate || 0)));
+                                                            return formaty.url;
+                                                        }
+                                                        const status = dane && dane.playabilityStatus
+                                                            ? dane.playabilityStatus.status + " " + (dane.playabilityStatus.reason || "")
+                                                            : statusHttp;
+                                                        zglosBlad("ANDROID_VR: " + status);
+                                                    } catch (e) {
+                                                        zglosBlad("ANDROID_VR: " + (e && e.message ? e.message : e));
                                                     }
-                                                    const status = dane && dane.playabilityStatus
-                                                        ? dane.playabilityStatus.status + " " + (dane.playabilityStatus.reason || "")
-                                                        : res.status;
-                                                    zglosBlad(k.nazwa + ": " + status);
-                                                } catch (e) {
-                                                    zglosBlad(k.nazwa + ": " + (e && e.message ? e.message : e));
+                                                    return null;
                                                 }
-                                            }
-                                            return null;
-                                        }
+
 
 
 
