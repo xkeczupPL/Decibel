@@ -13,12 +13,15 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - run: npm install
-      - run: |
-          ls node_modules/youtubei.js/bundle
-          cp node_modules/youtubei.js/bundle/browser.js www/youtubei.bundle.js || cp node_modules/youtubei.js/bundle/browser.min.js www/youtubei.bundle.js
-          ls -la www
       - run: npx cap add android
       - run: npx cap sync android
+      - run: |
+          rm -rf android/app/src/main/res/mipmap-anydpi-v26
+          for dir in android/app/src/main/res/mipmap-*; do
+            cp assets/icon.png "$dir/ic_launcher.png"
+            cp assets/icon.png "$dir/ic_launcher_round.png"
+            cp assets/icon.png "$dir/ic_launcher_foreground.png"
+          done
       - run: cd android && chmod +x gradlew && ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
         with:
