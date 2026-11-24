@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+
+<html>
+    <head>
+        <meta charset="UTF-8">
+
+        <link rel="stylesheet" href="style.css">
+
+        <title>Decibel</title>
+    </head>
+    <body>
+        <div class="top-part">
+        <div class="sidebar">
+        <h1>Decibel</h1>
+         <button class="btn active" id="btn-home">Strona główna</button>
+         <button class="btn" id="btn-search">Szukaj</button>
+         <button class="btn" id="btn-library">Biblioteka</button>
+         <button class="btn" id="btn-offline">Offline</button>
+        </div>
+
+        <div class="main">
+            <input class="search-input" type="text" placeholder="Wpisz nazwę utworu">
+
+            <div class="track-list">
+                <div class="track-item">
+                    <span>mettalica - enter sandman</span>
+                    <button class="btn">Pobierz do offline</button>
+            </div>
+        </div>
+        </div>
+        </div>
+        
+
+        <div class="player">
+            <button class="btn play-btn">Play</button>
+            <button class="btn" id="lyrics-btn" onclick="pokazTekstPiosenki()">Tekst</button>
+            <button class="btn" id="next-btn" onclick="grajNastepna()">Następna</button>
+
+            <span id="now-playing">Brak utworu</span>
+
+            <span id="time-display">0:00 / 0:00</span>
+
+            <input type="range" id="progress-slider" class="progress-bar" min="0" max="100" value="0" disabled>
+
+            <input type="range" id="volume-slider" min="0" max="100" value="80">
+            
+        </div>
+
+        <audio id="audio-player"></audio>
+        <div id="toast" class="toast"></div>
+        <div id="playlist-modal" class="modal-box"></div>
+        <div id="lyrics-modal" class="modal-box" style="width: 450px; max-height: 70vh; overflow-y: auto;"></div>
+
+        <script>
+            const searchInput = document.querySelector('.search-input')
+            const trackList = document.querySelector('.track-list')
+
+            const audio = document.getElementById('audio-player');
+            const playBtn = document.querySelector('.play-btn');
+            const nowPlaying = document.getElementById('now-playing');
+            const timeDisplay = document.getElementById('time-display');
+            const progressSlider = document.getElementById('progress-slider');
+            const volumeSlider = document.getElementById('volume-slider');
+
+            let aktualnaKolejka = [];
+            let aktualnyIndeks = -1;
+            let trybLosowy = false;
+
+
+
+            searchInput.addEventListener('keypress', async function(e){
+                if (e.key === 'Enter') {
+                    const query = searchInput.value;
+                    localStorage.setItem('ulubionyGatunek', query);
+                    const wyniki = await window.pywebview.api.search(query);
+                    renredujutwory(wyniki);
+            }
+
+
+            });
+
+            async function playTrack(videoId, title, index = -1, artist="") {
+                nowPlaying.textContent = "Ładowanie: " + title;
+                aktualnyIndeks = index;
+                if (videoId.startsWith('file://')) {
+                    audio.src = videoId;
+                    audio.play();
+                    playBtn.textContent = "Pauza";
+                    nowPlaying.textContent = "[OFFLINE] " + title;
+                    nowPlaying.dataset.artist = artist;
+                    progressSlider.disabled = false;
+                    return;
+                }
+                const dane = await window.pywebview.api.get_stream(videoId);
+                nowPlaying.dataset.artist = dane.artist || artist;
+                audio.src = dane.url;
+                audio.play();
+
+                playBtn.textContent = "Pauza";
+                nowPlaying.textContent = title;
+                progressSlider.disabled = false;
+                aktualnyIndeks = index;
+                
+            }   
+
+            async function pobierzOffline(url, title) {
+            pokazPowiadomienie("Pobieranie: " + title + "...");
+            const ok = await window.pywebview.api.download_offline(url, title);
+            if (ok) {
+                pokazPowiadomienie("Pobrano do Offline!");
+            } else {
+                pokazPowiadomienie("Błąd pobierania");
+            }
+            }
+
+
+            playBtn.addEventListener('click', function() {
+                    if (audio.paused) {
+                        audio.play();
+                        playBtn.textContent = "Pauza"
+                    }
+                    else {
+                        audio.pause();
+                        playBtn.textContent = "Odtwórz";
+                        
+                    }
+                })
+
+            function formatTime(sekundy) {
+                if (isNaN(sekundy)) return "0:00";
+                const min = Math.floor(sekundy / 60);
+                const sek = Math.floor(sekundy % 60);
+                return min + ":" + (sek < 10 ? "0" : "") + sek;
+            }
+
+            function pokazPowiadomienie(tekst) {
+                const toast = document.getElementById('toast');
+                toast.textContent = tekst;
+                toast.style.display = 'block';
+                setTimeout(() => {
+                    toast.style.display = 'none';
+                }, 1200);
+            }
+
+
+            audio.addEventListener('timeupdate', function() {
+                if (audio.duration) {
+                    const procent = (audio.currentTime / audio.duration) * 100;
+                    progressSlider.value = procent;
+                    timeDisplay.textContent = formatTime(audio.currentTime) + " / " + formatTime(audio.duration);
+                }
+            });
+
+            progressSlider.addEventListener('input', function() {
+                if (audio.duration) {
+                    audio.currentTime = (progressSlider.value / 100) * audio.duration;
+                }
+            });
+
+            let playlisty = { "Ulubione": [] };
+
+            async function zapiszPlaylisty() {
+                await window.pywebview.api.save_playlists(playlisty);
+            }
+
+
+            function otworzMenu(event, menuId) {
+                event.stopPropagation();
+                document.querySelectorAll('.dropdown-menu').forEach(m => {
+                    if (m.id !== menuId) m.classList.remove('show');
+                });
+                document.getElementById(menuId).classList.toggle('show');
+            }
+
+            window.addEventListener('click', function() {
+                document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('show'));
+            });
+
+            function renredujutwory(lista, nazwaPlaylisty = null) {
+                aktualnaKolejka = lista;
+                trackList.innerHTML = '';
+                
+                if (!lista || lista.length === 0) {
+                    trackList.innerHTML = '<div class="track-item"><span>Brak utworów na tej liscie</span></div>';
+                    return;
+                }
+
+                lista.forEach((track, index) => {
+                    const czystyTytul = track.title.replace(/'/g, "").replace(/"/g, "");
+                    trackList.innerHTML += `
+                        <div class="track-item">
+                            <span style="cursor: pointer;" onclick="playTrack('${track.url}', '${czystyTytul}', ${index}, '${(track.artist || '').replace(/'/g, '')}')">${track.title}</span>
+
+                            <div class="menu-container">
+                                <button class="dots-btn" onclick="otworzMenu(event, 'menu-${index}')">&#8942;</button>
+                                <div class="dropdown-menu" id="menu-${index}">
+                                    <button onclick="dodajDoPlaylisty('${track.url}', '${czystyTytul}')">Dodaj do playlisty</button>
+                                    <button onclick="pobierzOffline('${track.url}', '${czystyTytul}')">Pobierz do offline</button> ${nazwaPlaylisty ? `<button style="color: #e63946;" onclick="usunZPlaylisty('${nazwaPlaylisty}', ${index})">Usuń z playlisty</button>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }); 
+        }
+
+        async function pokazTekstPiosenki() {
+            const tytul = nowPlaying.textContent;
+            if (!tytul || tytul === "Brak utworu" || tytul.startsWith("Ładowanie:")) {
+                pokazPowiadomienie("Najpierw włącz piosenkę!");
+                return;
+            }
+
+            const modal = document.getElementById('lyrics-modal');
+            modal.innerHTML = `<h3 style="margin:0;">Szukam tekstu...</h3>`;
+            modal.style.display = 'flex';
+
+            const czystyTytul = tytul.replace("[OFFLINE] ", "").replace(/\(.*?\)|\[.*?\]/g, "").trim();
+            const artysta = (nowPlaying.dataset.artist || "").replace("- Topic", "").trim();
+            const zapytanieTekst = (artysta && !czystyTytul.includes(" - ") && !czystyTytul.toLowerCase().includes(artysta.toLowerCase()))
+            ? artysta + " " + czystyTytul
+            : czystyTytul;
+
+
+            try {
+                const res = await fetch("https://lrclib.net" + "/api/search?q=" + encodeURIComponent(zapytanieTekst));
+                const dane = await res.json();
+
+                if (dane && dane.length > 0 && dane[0].plainLyrics) {
+                    modal.innerHTML = `
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <h3 style="margin:0;">${dane[0].trackName} - ${dane[0].artistName}</h3>
+                            <button class="btn" style="background-color:#e63946;" onclick="document.getElementById('lyrics-modal').style.display='none'">Zamknij</button>
+                        </div>
+                        <pre style="white-space: pre-wrap; font-family: inherit; line-height: 1.5; margin-top: 15px;">${dane[0].plainLyrics}</pre>
+                    `;
+                } else {
+                    modal.innerHTML = `
+                        <p>Nie znaleziono tekstu dla: ${zapytanieTekst}</p>
+                        <button class="btn" onclick="document.getElementById('lyrics-modal').style.display='none'">Zamknij</button>
+                    `;
+                }
+            } catch (e) {
+                modal.innerHTML = `
+                    <p>Błąd połączenia z bazą tekstów.</p>
+                    <button class="btn" onclick="document.getElementById('lyrics-modal').style.display='none'">Zamknij</button>
+                `;
+            }
+        }
+
+
+
+
+        function usunPlayliste(event, nazwa) {
+            event.stopPropagation();
+            delete playlisty[nazwa];
+            zapiszPlaylisty();
+            pokazBiblioteke();
+            pokazPowiadomienie("Usunięto playlistę: " + nazwa);
+        }
+
+
+        function dodajDoPlaylisty(url, title) {
+            const modal = document.getElementById('playlist-modal');
+            modal.innerHTML = `<h3 style="margin: 0 0 10px 0;">Wybierz playlistę:</h3>`;
+
+            for (const nazwa of Object.keys(playlisty)) {
+                modal.innerHTML += `
+                    <button class="btn" onclick="zapiszDoWybranej('${nazwa}', '${url}', '${title}')">${nazwa}</button>
+                `;
+
+                
+
+            }
+
+            modal.innerHTML += `
+                <button class="btn" style="background-color: #e63946;" onclick="nowaIZapisz('${url}', '${title}')">+ Nowa playlista</button>
+                <button class="btn" onclick="zamknijModal()">Anuluj</button>
+            `;
+            modal.style.display = 'flex';
+        }
+
+        function zamknijModal() {
+            document.getElementById('playlist-modal').style.display = 'none';
+        }
+
+        function zapiszDoWybranej(nazwa, url, title) {
+            playlisty[nazwa].push({ title: title, url: url });
+            zapiszPlaylisty();
+            zamknijModal();
+            pokazPowiadomienie("Dodano do: " + nazwa);
+        }
+
+        function nowaIZapisz(url, title) {
+            const nazwa = prompt("Nazwa nowej playlisty:");
+            if (!nazwa) return;
+            if (!playlisty[nazwa]) playlisty[nazwa] = [];
+            zapiszDoWybranej(nazwa, url, title);
+        }
+
+        function usunZPlaylisty(nazwaPlaylisty, index) {
+            playlisty[nazwaPlaylisty].splice(index, 1);
+            zapiszPlaylisty();
+            otworzPlayliste(nazwaPlaylisty);
+            pokazPowiadomienie("Usunięto z playlisty");
+        }
+
+        function pokazBiblioteke() {
+            trackList.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-left: 15px;">
+                    <h3>Twoje playlisty</h3>
+                    <button class="btn" onclick="utworzPlayliste()">+ Nowa playlista</button>
+                </div>
+            `;
+            for (const nazwa of Object.keys(playlisty)) {
+                const ile = playlisty[nazwa].length;
+                trackList.innerHTML += `
+                    <div class="track-item" style="cursor: pointer;" onclick="otworzPlayliste('${nazwa}')">
+                        <span>${nazwa} (${ile} utworów)</span>
+                        <div>
+                            <button class="btn">Otwórz</button>
+                            <button class="btn" style="background-color: #e63946;" onclick="usunPlayliste(event, '${nazwa}')">Usuń</button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function utworzPlayliste() {
+            const nazwa = prompt("Podaj nazwę nowej playlisty:");
+            if (nazwa && !playlisty[nazwa]) {
+                playlisty[nazwa] = [];
+                zapiszPlaylisty();
+                pokazBiblioteke();
+            }
+        }
+
+        function otworzPlayliste(nazwa) {
+            renredujutwory(playlisty[nazwa], nazwa);
+            trackList.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-left: 15px;">
+                    <h3>Playlista: ${nazwa}</h3>
+                    <button class="btn" onclick="pokazBiblioteke()">Wróć do playlist</button>
+                    <button class="btn" style="background-color: #e63946;" onclick="odtworzOdPoczatku()">Odtwórz</button>
+                    <button class="btn" id="shuffle-btn" onclick="przelaczLosowe()">Losowo: WYŁ</button>
+                </div>
+            ` + trackList.innerHTML;
+        }
+
+        function wybierzGatunek(gatunek) {
+            localStorage.setItem('ulubionyGatunek', gatunek);
+            zaladujStroneGlowna();
+        }
+
+        function pokazWyborGatunku() {
+            const gatunki = ["Rock i Metal", "Rap i Hip-Hop", "Pop", "Muzyka Elektroniczna", "Chill / Lo-Fi"];
+            trackList.innerHTML = '<h2 style="margin-left: 15px;">Wybierz gatunek na start:</h2>';
+            for (const g of gatunki) {
+                trackList.innerHTML += `
+                    <div class="track-item" style="cursor: pointer;" onclick="wybierzGatunek('${g}')">
+                        <span>${g}</span>
+                        <button class="btn">Wybierz</button>
+                    </div>
+                `;
+            }
+        }
+
+        async function zaladujStroneGlowna() {
+            const zapisany = localStorage.getItem('ulubionyGatunek');
+            if (!zapisany) {
+                pokazWyborGatunku();
+                return;
+            }
+            trackList.innerHTML = `<div class="track-item"><span>Ładowanie polecanych (${zapisany})...</span></div>`;
+            const wyniki = await window.pywebview.api.search(zapisany + " songs");
+            renredujutwory(wyniki);
+            trackList.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-left: 15px;">
+                    <h3>Polecane dla Ciebie (${zapisany})</h3>
+                    <button class="btn" onclick="pokazWyborGatunku()">Zmień gatunek</button>
+                </div>
+            ` + trackList.innerHTML;
+        }
+
+        function ustawAktywny(przycisk) {
+            document.querySelectorAll('.sidebar .btn').forEach(b => b.classList.remove('active'));
+            przycisk.classList.add('active');
+        }
+
+                document.getElementById('btn-home').addEventListener('click', function() {
+                    ustawAktywny(this);
+                    pokazWyborGatunku();
+                });
+                document.getElementById('btn-offline').addEventListener('click', async function() {
+                    ustawAktywny(this);
+                    const pliki = await window.pywebview.api.get_offline_tracks();
+                    renredujutwory(pliki);
+                });
+
+
+                document.getElementById('btn-search').addEventListener('click', function() {
+                    ustawAktywny(this);
+                    searchInput.focus();
+                });
+
+                document.getElementById('btn-library').addEventListener('click', function() {
+                    ustawAktywny(this);
+                    pokazBiblioteke();
+                });
+
+                volumeSlider.addEventListener('input', function() {
+                    audio.volume = volumeSlider.value / 100;
+                });
+
+                window.addEventListener('pywebviewready', async function() {
+                playlisty = await window.pywebview.api.load_playlists();
+                zaladujStroneGlowna();
+            });
+
+
+                function przelaczLosowe() {
+            trybLosowy = !trybLosowy;
+            const btn = document.getElementById('shuffle-btn');
+            if (btn) btn.textContent = "Losowo: " + (trybLosowy ? "WŁ" : "WYŁ");
+            pokazPowiadomienie(trybLosowy ? "Włączono losowanie" : "Kolejność po kolei");
+        }
+
+        function odtworzOdPoczatku() {
+            if (aktualnaKolejka.length === 0) return;
+            const startIndex = trybLosowy ? Math.floor(Math.random() * aktualnaKolejka.length) : 0;
+            const utwor = aktualnaKolejka[startIndex];
+            playTrack(utwor.url, utwor.title, startIndex);
+        }
+
+        function losowyIndeksBezPowtorek() {
+            let nowy = aktualnyIndeks;
+            while (nowy === aktualnyIndeks) {
+                nowy = Math.floor(Math.random() * aktualnaKolejka.length);
+            }
+            return nowy;
+        }
+
+
+        function grajNastepna() {
+            if (aktualnaKolejka.length === 0) return;
+            if (trybLosowy) {
+                aktualnyIndeks = aktualnaKolejka.length === 1 ? 0 : losowyIndeksBezPowtorek();
+            } else {
+                aktualnyIndeks = (aktualnyIndeks + 1) % aktualnaKolejka.length;
+            }
+            const nastepny = aktualnaKolejka[aktualnyIndeks];
+            playTrack(nastepny.url, nastepny.title, aktualnyIndeks);
+        }
+
+
+        audio.addEventListener('ended', grajNastepna);
+
+
+        </script>
+    </body>
+</html>
