@@ -97,6 +97,16 @@
         let trybYt = false;
         let interwalYt = null;
 
+        function podtrzymajTlo() {
+            const cichyWav = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+            if (audio.src !== cichyWav) {
+                audio.src = cichyWav;
+                audio.loop = true;
+                audio.volume = 0.01;
+            }
+            audio.play().catch(() => {});
+        }
+
         function zaladujYtApi() {
             if (window.YT && window.YT.Player) {
                 utworzYtPlayer();
@@ -541,11 +551,11 @@
             if (!('mediaSession' in navigator)) return;
             navigator.mediaSession.setActionHandler('play', () => {
                 if (trybYt && ytPlayer && ytGotowy) ytPlayer.playVideo();
-                else audio.play().catch(() => {});
+                audio.play().catch(() => {});
             });
             navigator.mediaSession.setActionHandler('pause', () => {
                 if (trybYt && ytPlayer && ytGotowy) ytPlayer.pauseVideo();
-                else audio.pause();
+                audio.pause();
             });
             navigator.mediaSession.setActionHandler('nexttrack', () => {
                 grajNastepna();
@@ -579,6 +589,7 @@
             audio.pause();
             audio.removeAttribute('src');
             trybYt = true;
+            podtrzymajTlo();
             nowPlaying.textContent = track.title;
             progressSlider.disabled = false;
             progressSlider.value = 0;
