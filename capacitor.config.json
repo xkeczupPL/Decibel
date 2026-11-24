@@ -3,7 +3,8 @@
   "appName": "Decibel",
   "webDir": "www",
   "server": {
-    "androidScheme": "https"
+    "androidScheme": "https",
+    "allowNavigation": ["*"]
   },
   "plugins": {
     "CapacitorHttp": {
