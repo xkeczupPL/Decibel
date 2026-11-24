@@ -33,6 +33,7 @@
     </div>
 
     <audio id="audio-player" preload="auto"></audio>
+    <div id="yt-player" style="position:fixed;width:1px;height:1px;opacity:0.01;pointer-events:none;bottom:0;right:0;"></div>
     <div id="toast" class="toast"></div>
     <div id="backdrop" class="backdrop"></div>
     <div id="playlist-modal" class="modal-box"></div>
@@ -90,6 +91,60 @@
         let tokenOdtwarzania = 0;
         let tokenWidoku = 0;
         let czasToast = null;
+        let ytPlayer = null;
+        let ytGotowy = false;
+        let oczekujaceVideoId = null;
+        let trybYt = false;
+        let interwalYt = null;
+
+        function zaladujYtApi() {
+            if (window.YT && window.YT.Player) {
+                utworzYtPlayer();
+                return;
+            }
+            const tag = document.createElement('script');
+            tag.src = "https://www." + "you" + "tube" + ".com/iframe_api";
+            document.head.appendChild(tag);
+        }
+
+        window.onYouTubeIframeAPIReady = function () {
+            utworzYtPlayer();
+        };
+
+        function utworzYtPlayer() {
+            if (ytPlayer) return;
+            ytPlayer = new YT.Player('yt-player', {
+                height: '1',
+                width: '1',
+                playerVars: { autoplay: 1, controls: 0, playsinline: 1, rel: 0, origin: window.location.origin },
+                events: {
+                    onReady: function (e) {
+                        ytGotowy = true;
+                        e.target.setVolume(parseInt(volumeSlider.value, 10));
+                        if (oczekujaceVideoId) {
+                            const id = oczekujaceVideoId;
+                            oczekujaceVideoId = null;
+                            e.target.loadVideoById(id);
+                        }
+                    },
+                    onStateChange: function (e) {
+                        if (!trybYt) return;
+                        if (e.data === YT.PlayerState.PLAYING) {
+                            playBtn.textContent = "Pauza";
+                            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+                        } else if (e.data === YT.PlayerState.PAUSED) {
+                            playBtn.textContent = "Odtwórz";
+                            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+                        } else if (e.data === YT.PlayerState.ENDED) {
+                            grajNastepna();
+                        }
+                    },
+                    onError: function () {
+                        if (trybYt) pokazPowiadomienie("Film zablokowany w odtwarzaczu");
+                    }
+                }
+            });
+        }
 
         function el(tag, klasa, tekst) {
             const e = document.createElement(tag);
@@ -521,7 +576,6 @@
 
         async function playTrack(track, index = -1) {
             const token = ++tokenOdtwarzania;
-            probaPamieci = false;
             aktualnyIndeks = index;
             aktualnyUtwor = track;
             nowPlaying.textContent = "Ładowanie: " + track.title;
@@ -530,33 +584,45 @@
             const lokalny = await odczytajOffline(track.url);
             if (token !== tokenOdtwarzania) return;
 
-            let zrodlo = null;
-            let etykieta = track.title;
             if (lokalny && lokalny.blob) {
+                trybYt = false;
+                clearInterval(interwalYt);
+                if (ytPlayer && ytGotowy) ytPlayer.stopVideo();
                 if (aktualnyBlobUrl) URL.revokeObjectURL(aktualnyBlobUrl);
                 aktualnyBlobUrl = URL.createObjectURL(lokalny.blob);
-                zrodlo = aktualnyBlobUrl;
-                etykieta = "[OFFLINE] " + track.title;
-            } else {
-                zrodlo = await pobierzStrumien(track.url);
-                if (token !== tokenOdtwarzania) return;
-            }
-
-            if (!zrodlo) {
-                nowPlaying.textContent = track.title;
-                pokazBledy();
+                audio.src = aktualnyBlobUrl;
+                nowPlaying.textContent = "[OFFLINE] " + track.title;
+                progressSlider.disabled = false;
+                ustawMediaSession(track);
+                audio.play().catch(() => {});
                 return;
             }
 
-            audio.src = zrodlo;
-            nowPlaying.textContent = etykieta;
+            audio.pause();
+            audio.removeAttribute('src');
+            trybYt = true;
+            nowPlaying.textContent = track.title;
             progressSlider.disabled = false;
+            progressSlider.value = 0;
             ustawMediaSession(track);
 
-            try {
-                await audio.play();
-            } catch (e) {
-                pokazPowiadomienie("Nie można odtworzyć utworu");
+            clearInterval(interwalYt);
+            interwalYt = setInterval(() => {
+                if (!trybYt || !ytPlayer || !ytGotowy || typeof ytPlayer.getDuration !== 'function') return;
+                const dur = ytPlayer.getDuration();
+                const cur = ytPlayer.getCurrentTime();
+                if (dur > 0) {
+                    progressSlider.value = (cur / dur) * 100;
+                    timeDisplay.textContent = formatTime(cur) + " / " + formatTime(dur);
+                }
+            }, 500);
+
+            if (ytGotowy && ytPlayer) {
+                ytPlayer.loadVideoById(track.url);
+                ytPlayer.playVideo();
+            } else {
+                oczekujaceVideoId = track.url;
+                zaladujYtApi();
             }
         }
 
@@ -869,12 +935,12 @@
         });
 
         playBtn.addEventListener('click', function () {
-            if (!audio.src) return;
-            if (audio.paused) {
-                audio.play().catch(() => {});
-            } else {
-                audio.pause();
+            if (trybYt && ytPlayer && ytGotowy) {
+                ytPlayer.getPlayerState() === YT.PlayerState.PLAYING ? ytPlayer.pauseVideo() : ytPlayer.playVideo();
+                return;
             }
+            if (!audio.src) return;
+            audio.paused ? audio.play().catch(() => {}) : audio.pause();
         });
 
         nextBtn.addEventListener('click', grajNastepna);
@@ -923,13 +989,17 @@
         audio.addEventListener('ended', grajNastepna);
 
         progressSlider.addEventListener('input', function () {
-            if (audio.duration) {
-                audio.currentTime = (progressSlider.value / 100) * audio.duration;
+            if (trybYt && ytPlayer && ytGotowy) {
+                const dur = ytPlayer.getDuration();
+                if (dur > 0) ytPlayer.seekTo((progressSlider.value / 100) * dur, true);
+                return;
             }
+            if (audio.duration) audio.currentTime = (progressSlider.value / 100) * audio.duration;
         });
 
         volumeSlider.addEventListener('input', function () {
             audio.volume = volumeSlider.value / 100;
+            if (ytPlayer && ytGotowy) ytPlayer.setVolume(parseInt(volumeSlider.value, 10));
         });
 
         document.getElementById('btn-home').addEventListener('click', function () {
@@ -957,6 +1027,7 @@
             audio.volume = volumeSlider.value / 100;
             zarejestrujAkcjeMediaSession();
             odswiezInstancje();
+            zaladujYtApi();
             zaladujStroneGlowna();
         });
     </script>
