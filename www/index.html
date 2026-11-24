@@ -345,30 +345,6 @@
             return cap && cap.request ? cap : null;
         }
 
-        async function zapytajKlientaYt(k, videoId) {
-            const endpoint = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
-            const cialo = {
-                videoId: videoId,
-                params: "CgIIAQ==",
-                playbackContext: { contentPlaybackContext: { html5Preference: "HTML5_PREF_WANTS" } },
-                context: { client: k.client }
-            };
-            const naglowki = {
-                "Content-Type": "application/json",
-                "User-Agent": k.ua,
-                "X-YouTube-Client-Name": k.id,
-                "X-YouTube-Client-Version": k.wersja
-            };
-            const cap = pobierzCapHttp();
-            if (cap) {
-                const odp = await cap.request({ url: endpoint, method: "POST", headers: naglowki, data: cialo });
-                const dane = typeof odp.data === "string" ? JSON.parse(odp.data) : odp.data;
-                return { dane: dane, status: odp.status };
-            }
-            const res = await fetch(endpoint, { method: "POST", headers: naglowki, body: JSON.stringify(cialo) });
-            return { dane: await res.json().catch(() => null), status: res.status };
-        }
-
         async function pobierzStrumienYoutubei(videoId) {
             for (const k of KLIENCI_YT) {
                 try {
@@ -564,10 +540,12 @@
         function zarejestrujAkcjeMediaSession() {
             if (!('mediaSession' in navigator)) return;
             navigator.mediaSession.setActionHandler('play', () => {
-                audio.play().catch(() => {});
+                if (trybYt && ytPlayer && ytGotowy) ytPlayer.playVideo();
+                else audio.play().catch(() => {});
             });
             navigator.mediaSession.setActionHandler('pause', () => {
-                audio.pause();
+                if (trybYt && ytPlayer && ytGotowy) ytPlayer.pauseVideo();
+                else audio.pause();
             });
             navigator.mediaSession.setActionHandler('nexttrack', () => {
                 grajNastepna();
