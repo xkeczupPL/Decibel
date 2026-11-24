@@ -56,6 +56,9 @@
         ];
 
         let aktualnyBlobUrl = null;
+        let ostatnieNaglowki = {};
+        let ostatniTypAudio = "audio/mp4";
+        let probaPamieci = false;
         let PIPED_INSTANCES = DOMYSLNE_INSTANCJE.slice();
         let ostatniBlad = "";
         let bledy = [];
@@ -240,79 +243,98 @@
             }
         }
 
-                                                async function pobierzStrumienYoutubei(videoId) {
-                                                    const domena = "www." + "you" + "tube" + ".com";
-                                                    const endpoint = "https://" + domena + "/youtubei/v1/player?prettyPrint=false";
-                                                    const cialo = {
-                                                        videoId: videoId,
-                                                        params: "CgIIAQ==",
-                                                        playbackContext: { contentPlaybackContext: { html5Preference: "HTML5_PREF_WANTS" } },
-                                                        context: {
-                                                            client: {
-                                                                clientName: "ANDROID_VR",
-                                                                clientVersion: "1.60.19",
-                                                                androidSdkVersion: 32,
-                                                                osName: "Android",
-                                                                osVersion: "12L",
-                                                                deviceMake: "Oculus",
-                                                                deviceModel: "Quest 3",
-                                                                hl: "en",
-                                                                gl: "US"
-                                                            }
-                                                        }
-                                                    };
-                                                    const naglowki = {
-                                                        "Content-Type": "application/json",
-                                                        "User-Agent": "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
-                                                        "X-YouTube-Client-Name": "28",
-                                                        "X-YouTube-Client-Version": "1.60.19"
-                                                    };
+        const KLIENCI_YT = [
+            {
+                nazwa: "ANDROID_VR 1.65",
+                id: "28",
+                wersja: "1.65.10",
+                ua: "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+                client: { clientName: "ANDROID_VR", clientVersion: "1.65.10", androidSdkVersion: 32, osName: "Android", osVersion: "12L", deviceMake: "Oculus", deviceModel: "Quest 3", hl: "en", gl: "US" }
+            },
+            {
+                nazwa: "ANDROID_VR 1.60",
+                id: "28",
+                wersja: "1.60.19",
+                ua: "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+                client: { clientName: "ANDROID_VR", clientVersion: "1.60.19", androidSdkVersion: 32, osName: "Android", osVersion: "12L", deviceMake: "Oculus", deviceModel: "Quest 3", hl: "en", gl: "US" }
+            },
+            {
+                nazwa: "IOS",
+                id: "5",
+                wersja: "20.10.4",
+                ua: "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+                client: { clientName: "IOS", clientVersion: "20.10.4", deviceMake: "Apple", deviceModel: "iPhone16,2", osName: "iPhone", osVersion: "18.3.2.22D82", hl: "en", gl: "US" }
+            }
+        ];
 
-                                                    try {
-                                                        let dane = null;
-                                                        let statusHttp = 0;
-                                                        const capHttp = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
-                                                        if (capHttp && capHttp.request) {
-                                                            const odp = await capHttp.request({
-                                                                url: endpoint,
-                                                                method: "POST",
-                                                                headers: naglowki,
-                                                                data: cialo
-                                                            });
-                                                            statusHttp = odp.status;
-                                                            dane = typeof odp.data === "string" ? JSON.parse(odp.data) : odp.data;
-                                                        } else {
-                                                            const res = await fetch(endpoint, {
-                                                                method: "POST",
-                                                                headers: naglowki,
-                                                                body: JSON.stringify(cialo)
-                                                            });
-                                                            statusHttp = res.status;
-                                                            dane = await res.json().catch(() => null);
-                                                        }
+        function pobierzCapHttp() {
+            const cap = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CapacitorHttp;
+            return cap && cap.request ? cap : null;
+        }
 
-                                                        const formaty = (dane && dane.streamingData && Array.isArray(dane.streamingData.adaptiveFormats))
-                                                            ? dane.streamingData.adaptiveFormats.filter(f => f.url && f.mimeType && f.mimeType.startsWith("audio/"))
-                                                            : [];
-                                                        if (formaty.length) {
-                                                            const waga = f => (f.mimeType.includes("mp4") ? 1 : 0);
-                                                            formaty.sort((a, b) => (waga(b) - waga(a)) || ((b.bitrate || 0) - (a.bitrate || 0)));
-                                                            return formaty.url;
-                                                        }
-                                                        const status = dane && dane.playabilityStatus
-                                                            ? dane.playabilityStatus.status + " " + (dane.playabilityStatus.reason || "")
-                                                            : statusHttp;
-                                                        zglosBlad("ANDROID_VR: " + status);
-                                                    } catch (e) {
-                                                        zglosBlad("ANDROID_VR: " + (e && e.message ? e.message : e));
-                                                    }
-                                                    return null;
-                                                }
+        async function zapytajKlientaYt(k, videoId) {
+            const endpoint = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
+            const cialo = {
+                videoId: videoId,
+                params: "CgIIAQ==",
+                playbackContext: { contentPlaybackContext: { html5Preference: "HTML5_PREF_WANTS" } },
+                context: { client: k.client }
+            };
+            const naglowki = {
+                "Content-Type": "application/json",
+                "User-Agent": k.ua,
+                "X-YouTube-Client-Name": k.id,
+                "X-YouTube-Client-Version": k.wersja
+            };
+            const cap = pobierzCapHttp();
+            if (cap) {
+                const odp = await cap.request({ url: endpoint, method: "POST", headers: naglowki, data: cialo });
+                const dane = typeof odp.data === "string" ? JSON.parse(odp.data) : odp.data;
+                return { dane: dane, status: odp.status };
+            }
+            const res = await fetch(endpoint, { method: "POST", headers: naglowki, body: JSON.stringify(cialo) });
+            return { dane: await res.json().catch(() => null), status: res.status };
+        }
 
+        async function pobierzStrumienYoutubei(videoId) {
+            for (const k of KLIENCI_YT) {
+                try {
+                    const { dane, status } = await zapytajKlientaYt(k, videoId);
+                    const formaty = (dane && dane.streamingData && Array.isArray(dane.streamingData.adaptiveFormats))
+                        ? dane.streamingData.adaptiveFormats.filter(f => f.url && f.mimeType && f.mimeType.startsWith("audio/"))
+                        : [];
+                    if (formaty.length) {
+                        const waga = f => (f.mimeType.includes("mp4") ? 1 : 0);
+                        formaty.sort((x, y) => (waga(y) - waga(x)) || ((y.bitrate || 0) - (x.bitrate || 0)));
+                        ostatnieNaglowki = { "User-Agent": k.ua };
+                        ostatniTypAudio = formaty[0].mimeType.split(";")[0];
+                        return formaty[0].url;
+                    }
+                    const stan = dane && dane.playabilityStatus
+                        ? dane.playabilityStatus.status + " " + String(dane.playabilityStatus.reason || "").slice(0, 60)
+                        : "HTTP " + status;
+                    zglosBlad(k.nazwa + ": " + stan);
+                } catch (e) {
+                    zglosBlad(k.nazwa + ": " + (e && e.message ? String(e.message).slice(0, 80) : e));
+                }
+            }
+            return null;
+        }
 
-
-
-
+        async function pobierzBlob(adres) {
+            const cap = pobierzCapHttp();
+            if (cap) {
+                const odp = await cap.request({ url: adres, method: "GET", headers: ostatnieNaglowki, responseType: "blob" });
+                if (odp.status < 200 || odp.status >= 300) throw new Error("odpowiedź " + odp.status);
+                const bin = atob(odp.data);
+                const bajty = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bajty[i] = bin.charCodeAt(i);
+                return new Blob([bajty], { type: ostatniTypAudio });
+            }
+            const res = await fetch(adres);
+            if (!res.ok) throw new Error("odpowiedź " + res.status);
+            return await res.blob();
+        }
 
         function zglosBlad(tekst) {
             ostatniBlad = tekst;
@@ -369,9 +391,7 @@
                 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
                 const zrodlo = await pobierzStrumien(track.url);
                 if (!zrodlo) throw new Error("brak strumienia");
-                const res = await fetch(zrodlo);
-                if (!res.ok) throw new Error("odpowiedź " + res.status);
-                const blob = await res.blob();
+                const blob = await pobierzBlob(zrodlo);
                 await operacjaBazy('readwrite', st => st.put({
                     url: track.url,
                     title: track.title,
@@ -426,6 +446,7 @@
 
         async function pobierzStrumien(videoId) {
             bledy = [];
+            ostatnieNaglowki = {};
             const bezposredni = await pobierzStrumienYoutubei(videoId);
             if (bezposredni) return bezposredni;
             const dane = await zapytajPiped(
@@ -482,6 +503,7 @@
 
         async function playTrack(track, index = -1) {
             const token = ++tokenOdtwarzania;
+            probaPamieci = false;
             aktualnyIndeks = index;
             aktualnyUtwor = track;
             nowPlaying.textContent = "Ładowanie: " + track.title;
@@ -852,8 +874,25 @@
             if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
         });
 
-        audio.addEventListener('error', function () {
-            if (audio.src) pokazPowiadomienie("Błąd odtwarzania");
+        audio.addEventListener('error', async function () {
+            if (!audio.src) return;
+            if (audio.src.startsWith('blob:') || probaPamieci) {
+                pokazPowiadomienie("Błąd odtwarzania");
+                return;
+            }
+            probaPamieci = true;
+            const token = tokenOdtwarzania;
+            pokazPowiadomienie("Ponawiam przez pamięć...");
+            try {
+                const blob = await pobierzBlob(audio.src);
+                if (token !== tokenOdtwarzania) return;
+                if (aktualnyBlobUrl) URL.revokeObjectURL(aktualnyBlobUrl);
+                aktualnyBlobUrl = URL.createObjectURL(blob);
+                audio.src = aktualnyBlobUrl;
+                await audio.play();
+            } catch (e) {
+                pokazPowiadomienie("Błąd odtwarzania");
+            }
         });
 
         audio.addEventListener('timeupdate', function () {
