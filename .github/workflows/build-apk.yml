@@ -15,6 +15,47 @@ jobs:
       - run: npm install
       - run: npx cap add android
       - run: npx cap sync android
+      - name: Enable background audio playback
+        run: |
+          MAIN_ACT=$(find android/app/src/main/java -name "MainActivity.java" | head -n 1)
+          PKG_LINE=$(grep "^package " "$MAIN_ACT")
+          cat << EOF > "$MAIN_ACT"
+          $PKG_LINE
+
+          import android.os.Bundle;
+          import android.webkit.WebSettings;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  if (this.bridge != null && this.bridge.getWebView() != null) {
+                      WebSettings settings = this.bridge.getWebView().getSettings();
+                      settings.setMediaPlaybackRequiresUserGesture(false);
+                  }
+              }
+
+              @Override
+              public void onPause() {
+                  super.onPause();
+                  if (this.bridge != null && this.bridge.getWebView() != null) {
+                      this.bridge.getWebView().onResume();
+                      this.bridge.getWebView().resumeTimers();
+                  }
+              }
+
+              @Override
+              public void onStop() {
+                  super.onStop();
+                  if (this.bridge != null && this.bridge.getWebView() != null) {
+                      this.bridge.getWebView().onResume();
+                      this.bridge.getWebView().resumeTimers();
+                  }
+              }
+          }
+          EOF
+          sed -i 's/<application/<uses-permission android:name="android.permission.WAKE_LOCK" \/>\n    <application/' android/app/src/main/AndroidManifest.xml
       - run: |
           rm -rf android/app/src/main/res/mipmap-anydpi-v26
           for dir in android/app/src/main/res/mipmap-*; do
